@@ -5,34 +5,24 @@ namespace PbDatabase;
 
 public sealed class LoadedPage
 {
-    private const int Dirty = 0b00000001;
-    private const int IoInProgress = 0b00000010;
+    internal const int Dirty = 0b00000001;
+    internal const int IoInProgress = 0b00000010;
 
     public readonly PageBuffer PageBuffer;
-    private readonly ManualResetEventSlim _eventSlim;
+    internal readonly ManualResetEventSlim EventSlim;
 
     private SpinLock _lock;
     private int _counter;
-    private int _flags;
-
-    public bool IsDirty
-    {
-        get => (_flags & Dirty) == Dirty;
-        set => _flags = value ? _flags | Dirty : _flags & ~Dirty;
-    }
-
-    public bool IsIoInProgress
-    {
-        get => (_flags & IoInProgress) == IoInProgress;
-        set => _flags = value ? _flags | IoInProgress : _flags & ~IoInProgress;
-    }
+    internal volatile int Flags;
 
     public bool IsPinned => Interlocked.CompareExchange(ref _counter, 0, 0) != 0;
+
+    public bool IsPinnedMultipleTimes => Interlocked.CompareExchange(ref _counter, 0, 0) > 1;
 
     public LoadedPage(PageBuffer pageBuffer)
     {
         PageBuffer = pageBuffer;
-        _eventSlim = new ManualResetEventSlim();
+        EventSlim = new ManualResetEventSlim();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -50,13 +40,13 @@ public sealed class LoadedPage
             _lock.Enter(ref success);
             Debug.Assert(success);
 
-            if (!IsIoInProgress)
+            if ((Flags & IoInProgress) == 0)
                 return;
 
             if (success)
                 _lock.Exit();
 
-            _eventSlim.Wait();
+            EventSlim.Wait();
         }
     }
 
