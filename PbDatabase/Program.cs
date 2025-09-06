@@ -1,28 +1,29 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
-using System.Security.Cryptography;
+using System.Text;
 using PbDatabase;
 
+const long payloadLength = 1024 * 1024;
+
 var stream = File.Open("test.pbdb", FileMode.Create, FileAccess.ReadWrite, FileShare.Read);
+PageManager.InitializeFilePayloadSize(stream, payloadLength);
 
-stream.SetLength(8 * 1024 * 16);
+var pageManager = new PageManager(stream);
+var backgroundWriter = new BackgroundWriter(pageManager);
+var dataManager = new DataManager(pageManager);
 
-stream.Flush(true);
+Span<byte> helloWorld = "Hello world!"u8.ToArray();
 
-var loader = new PageManager(stream);
+dataManager.Write(0, helloWorld);
 
-var page = loader.GetAndPin(0);
+Span<byte> buffer = stackalloc byte[helloWorld.Length];
 
-bool locked = false;
-try
-{
-    page.LockWrite(ref locked);
+dataManager.Read(0, buffer);
 
-    RandomNumberGenerator.Fill(page.PageBuffer.Data);
-}
-finally
-{
-    if (locked)
-        page.ReleaseLock();
-    page.Unpin();
-}
+Console.WriteLine(Encoding.UTF8.GetString(buffer));
+
+backgroundWriter.SyncOnce();
+
+var maxPayloadLength = pageManager.GetMaxPayloadLength();
+
+Console.WriteLine(maxPayloadLength >= payloadLength);

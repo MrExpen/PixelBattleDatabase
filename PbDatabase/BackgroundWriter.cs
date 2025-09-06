@@ -22,68 +22,78 @@ public sealed class BackgroundWriter
         var buffer = new LoadedPage[BatchSize];
         while (!cancellation.IsCancellationRequested)
         {
-            int offset = 0;
-            int read = 0;
+            await Task.Delay(_delay, cancellation);
 
-            while (true)
+            Sync(buffer);
+        }
+    }
+
+    private void Sync(Span<LoadedPage> buffer)
+    {
+        int offset = 0;
+        int read = 0;
+
+        while (true)
+        {
+            try
             {
-                try
+                read = _pageManager.ReadFromMemory(offset, buffer);
+
+                if (read == 0)
+                    break;
+                offset += read;
+
+                for (var i = 0; i < read; i++)
                 {
-                    read = _pageManager.ReadFromMemory(offset, buffer);
+                    var page = buffer[i];
 
-                    if (read == 0)
-                        break;
-                    offset += read;
-
-                    for (var i = 0; i < read; i++)
+                    bool locked = false;
+                    try
                     {
-                        var page = buffer[i];
+                        page.LockRead(ref locked);
 
-                        bool locked = false;
-                        try
-                        {
-                            page.LockRead(ref locked);
+                        if ((page.Flags & (LoadedPage.Dirty | LoadedPage.IoInProgress)) != LoadedPage.Dirty)
+                            continue;
 
-                            if ((page.Flags & (LoadedPage.Dirty | LoadedPage.IoInProgress)) != LoadedPage.Dirty)
-                                continue;
-
-                            page.EventSlim.Reset();
-                            Interlocked.Or(ref page.Flags, LoadedPage.IoInProgress);
-                        }
-                        finally
-                        {
-                            if (locked)
-                                page.ReleaseLock();
-                        }
-
-                        _pageManager.DumpPage(page);
-
-                        locked = false;
-                        try
-                        {
-                            page.LockRead(ref locked);
-
-                            Interlocked.And(ref page.Flags, ~(LoadedPage.Dirty | LoadedPage.IoInProgress));
-                        }
-                        finally
-                        {
-                            if (locked)
-                                page.ReleaseLock();
-                        }
-
-                        page.EventSlim.Set();
+                        page.EventSlim.Reset();
+                        Interlocked.Or(ref page.Flags, LoadedPage.IoInProgress);
                     }
-                }
-                finally
-                {
-                    for (int i = 0; i < read; i++)
+                    finally
                     {
-                        buffer[i].Unpin();
+                        if (locked)
+                            page.ReleaseLock();
                     }
+
+                    _pageManager.DumpPage(page);
+
+                    locked = false;
+                    try
+                    {
+                        page.LockRead(ref locked);
+
+                        Interlocked.And(ref page.Flags, ~(LoadedPage.Dirty | LoadedPage.IoInProgress));
+                    }
+                    finally
+                    {
+                        if (locked)
+                            page.ReleaseLock();
+                    }
+
+                    page.EventSlim.Set();
                 }
             }
-
-            await Task.Delay(_delay, cancellation);
+            finally
+            {
+                for (int i = 0; i < read; i++)
+                {
+                    buffer[i].Unpin();
+                }
+            }
         }
+    }
+
+    internal void SyncOnce()
+    {
+        Sync(new LoadedPage[BatchSize]);
     }
 }

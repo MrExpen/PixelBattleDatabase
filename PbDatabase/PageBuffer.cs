@@ -10,8 +10,8 @@ public sealed class PageBuffer
     private const int CheckSumSize = 4;
     private const int NumberOffset = CheckSumSize;
     private const int LsnOffset = 12;
-    private const int DataOffset = 32;
-    private const int DataLength = PageManager.PageSize - DataOffset;
+    private const int PayloadOffset = 32;
+    internal const int PayloadLength = PageManager.PageSize - PayloadOffset;
 
     private readonly byte[] _buffer;
 
@@ -28,7 +28,11 @@ public sealed class PageBuffer
         private set => BinaryPrimitives.WriteUInt32BigEndian(_buffer.AsSpan(CheckSumOffset), value);
     }
 
-    public long Number => BinaryPrimitives.ReadInt64BigEndian(_buffer.AsSpan(NumberOffset));
+    public long Number
+    {
+        get => BinaryPrimitives.ReadInt64BigEndian(_buffer.AsSpan(NumberOffset));
+        internal set => BinaryPrimitives.WriteInt64BigEndian(_buffer.AsSpan(NumberOffset), value);
+    }
 
     public long Lsn
     {
@@ -36,7 +40,7 @@ public sealed class PageBuffer
         set => BinaryPrimitives.WriteInt64BigEndian(_buffer.AsSpan(LsnOffset), value);
     }
 
-    public Span<byte> Data => _buffer.AsSpan(DataOffset, DataLength);
+    public Span<byte> Payload => _buffer.AsSpan(PayloadOffset, PayloadLength);
 
     public Span<byte> RawBuffer => _buffer.AsSpan(0, PageManager.PageSize);
 

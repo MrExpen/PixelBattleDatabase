@@ -40,12 +40,12 @@ public sealed class PageManager
             if (length <= 0)
                 return 0;
 
-            length = Math.Max(length, buffer.Length);
+            length = Math.Min(length, buffer.Length);
             _array.AsSpan(offset, length).CopyTo(buffer);
 
-            foreach (var loadedPage in buffer)
+            for (var i = 0; i < length; i++)
             {
-                loadedPage.Pin();
+                buffer[i].Pin();
             }
 
             return length;
@@ -155,7 +155,20 @@ public sealed class PageManager
 
     private static int CalculateCapacity(FileStream fileStream)
     {
-        throw new NotImplementedException();
+        //TODO calculate based on available memory
+        return (int)((fileStream.Length - HeadersSize) / PageSize);
+    }
+
+    public long GetMaxPayloadLength()
+    {
+        long fileLength;
+
+        lock (_fileLock)
+        {
+            fileLength = _fileStream.Length;
+        }
+
+        return (fileLength - HeadersSize) / PageSize * PageBuffer.PayloadLength;
     }
 
     public void FlushBuffers()
@@ -164,5 +177,27 @@ public sealed class PageManager
         {
             _fileStream.Flush(true);
         }
+    }
+
+    public static void InitializeFilePages(FileStream fileStream, long pageCount)
+    {
+        var buffer = new byte[PageSize];
+        var pageBuffer = new PageBuffer(buffer);
+        fileStream.SetLength(HeadersSize + pageCount * PageSize);
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            pageBuffer.Number = i;
+            pageBuffer.RecomputeCheckSum();
+            fileStream.Write(pageBuffer.RawBuffer);
+        }
+
+        fileStream.Flush(true);
+    }
+
+    public static void InitializeFilePayloadSize(FileStream fileStream, long size)
+    {
+        var pages = (long)Math.Ceiling(size / (double)PageBuffer.PayloadLength);
+        InitializeFilePages(fileStream, pages);
     }
 }
